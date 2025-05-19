@@ -65,13 +65,21 @@ const Home = () => {
                     </button>
                     <span className="createInfo">
                         No Invitation click to create &nbsp;
-                        <a
+                        <button
                             onClick={createNewRoom}
-                            href=""
                             className="createNewBtn"
+                            type="button"
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                cursor: 'pointer',
+                                color: 'blue',
+                                textDecoration: 'underline',
+                            }}
                         >
                             new room
-                        </a>
+                        </button>
                     </span>
                 </div>
             </div>
