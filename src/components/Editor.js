@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Codemirror from 'codemirror';
 import 'codemirror/lib/codemirror.css';
 import 'codemirror/theme/erlang-dark.css';
@@ -10,6 +10,15 @@ import ACTIONS from '../Actions';
 const Editor = ({ socketRef, roomId, onCodeChange }) => {
   const editorRef = useRef(null);
   const [output, setOutput] = useState('');
+
+  // Memoize onCodeChange if possible (if it's defined inline in parent)
+  // If you control parent component, wrap its onCodeChange with useCallback.
+  const memoizedOnCodeChange = useCallback(
+    (code) => {
+      onCodeChange(code);
+    },
+    [onCodeChange]
+  );
 
   useEffect(() => {
     editorRef.current = Codemirror.fromTextArea(
@@ -23,52 +32,72 @@ const Editor = ({ socketRef, roomId, onCodeChange }) => {
       }
     );
 
-    editorRef.current.on('change', (instance, changes) => {
+    const handleChange = (instance, changes) => {
       const { origin } = changes;
       const code = instance.getValue();
-      onCodeChange(code);
-      if (origin !== 'setValue') {
+      memoizedOnCodeChange(code);
+
+      if (origin !== 'setValue' && socketRef.current) {
         socketRef.current.emit(ACTIONS.CODE_CHANGE, {
           roomId,
           code,
         });
       }
-    });
-  }, []);
+    };
+
+    editorRef.current.on('change', handleChange);
+
+    // Cleanup editor event on unmount
+    return () => {
+      if (editorRef.current) {
+        editorRef.current.off('change', handleChange);
+      }
+    };
+  }, [memoizedOnCodeChange, roomId, socketRef]);
 
   useEffect(() => {
-    if (socketRef.current) {
-      socketRef.current.on(ACTIONS.CODE_CHANGE, ({ code }) => {
-        if (code !== null) {
-          editorRef.current.setValue(code);
-        }
-      });
-    }
+    if (!socketRef.current) return;
+
+    const socket = socketRef.current;
+
+    const codeChangeHandler = ({ code }) => {
+      if (code !== null && editorRef.current) {
+        editorRef.current.setValue(code);
+      }
+    };
+
+    socket.on(ACTIONS.CODE_CHANGE, codeChangeHandler);
 
     return () => {
-      socketRef.current.off(ACTIONS.CODE_CHANGE);
+      socket.off(ACTIONS.CODE_CHANGE, codeChangeHandler);
     };
   }, [socketRef]);
 
   const runCode = () => {
     const code = editorRef.current.getValue();
     let result = '';
+
     try {
       const originalLog = console.log;
       console.log = (...args) => {
         result += args.join(' ') + '\n';
       };
-      eval(code); // ⚠️ Only use eval with trusted input
+
+      // Safer than eval, but still be cautious running arbitrary code
+      // eslint-disable-next-line no-new-func
+      new Function('"use strict";' + code)();
+
       console.log = originalLog;
     } catch (err) {
       result = `Error: ${err.message}`;
     }
+
     setOutput(result);
   };
 
   return (
     <div>
-      <textarea id="realtimeEditor"></textarea>
+      <textarea id="realtimeEditor" />
       <button onClick={runCode} style={buttonStyle}>
         Run Code
       </button>
