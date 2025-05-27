@@ -1,5 +1,7 @@
 import { io } from 'socket.io-client';
 
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+
 export const initSocket = async () => {
   const options = {
     'force new connection': true,
@@ -8,5 +10,5 @@ export const initSocket = async () => {
     transports: ['websocket'],
   };
 
-  return io(process.env.REACT_APP_BACKEND_URL, options);
+  return io(BACKEND_URL, options);
 };
