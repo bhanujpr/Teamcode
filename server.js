@@ -1,76 +1,82 @@
 const express = require('express');
+const app = express();
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
-const ACTIONS = require('./src/Actions'); // Adjust if Actions.js moved
+const ACTIONS = require('./src/Actions');
 
-const app = express();
 const server = http.createServer(app);
+const io = new Server(server);
 
-// CORS for socket.io
-const io = new Server(server, {
-  cors: {
-    origin: "*", // Safe for same origin (change to Vercel if separating front/backend)
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
+app.use(express.static('build'));
+app.use((req, res, next) => {
+    res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
 
 const userSocketMap = {};
+const activeRooms = {}; // ✅ Track rooms and their socket IDs
+
 function getAllConnectedClients(roomId) {
-  return Array.from(io.sockets.adapter.rooms.get(roomId) || []).map(
-    (socketId) => ({
-      socketId,
-      username: userSocketMap[socketId],
-    })
-  );
+    return Array.from(io.sockets.adapter.rooms.get(roomId) || []).map(
+        (socketId) => ({
+            socketId,
+            username: userSocketMap[socketId],
+        })
+    );
 }
 
 io.on('connection', (socket) => {
-  console.log('Socket connected:', socket.id);
+    console.log('socket connected', socket.id);
 
-  socket.on(ACTIONS.JOIN, ({ roomId, username }) => {
-    userSocketMap[socket.id] = username;
-    socket.join(roomId);
-    const clients = getAllConnectedClients(roomId);
-    clients.forEach(({ socketId }) => {
-      io.to(socketId).emit(ACTIONS.JOINED, {
-        clients,
-        username,
-        socketId: socket.id,
-      });
+    socket.on(ACTIONS.JOIN, ({ roomId, username }) => {
+        userSocketMap[socket.id] = username;
+        socket.join(roomId);
+
+        // ✅ Track active rooms
+        if (!activeRooms[roomId]) activeRooms[roomId] = new Set();
+        activeRooms[roomId].add(socket.id);
+
+        const clients = getAllConnectedClients(roomId);
+        clients.forEach(({ socketId }) => {
+            io.to(socketId).emit(ACTIONS.JOINED, {
+                clients,
+                username,
+                socketId: socket.id,
+            });
+        });
     });
-  });
 
-  socket.on(ACTIONS.CODE_CHANGE, ({ roomId, code }) => {
-    socket.in(roomId).emit(ACTIONS.CODE_CHANGE, { code });
-  });
-
-  socket.on(ACTIONS.SYNC_CODE, ({ socketId, code }) => {
-    io.to(socketId).emit(ACTIONS.CODE_CHANGE, { code });
-  });
-
-  socket.on('disconnecting', () => {
-    const rooms = [...socket.rooms];
-    rooms.forEach((roomId) => {
-      socket.in(roomId).emit(ACTIONS.DISCONNECTED, {
-        socketId: socket.id,
-        username: userSocketMap[socket.id],
-      });
+    socket.on(ACTIONS.CODE_CHANGE, ({ roomId, code }) => {
+        socket.in(roomId).emit(ACTIONS.CODE_CHANGE, { code });
     });
-    delete userSocketMap[socket.id];
-    socket.leave();
-  });
-});
 
-// Serve static React build
-const buildPath = path.join(__dirname, 'src', 'build');
-app.use(express.static(buildPath));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(buildPath, 'index.html'));
+    socket.on(ACTIONS.SYNC_CODE, ({ socketId, code }) => {
+        io.to(socketId).emit(ACTIONS.CODE_CHANGE, { code });
+    });
+
+    socket.on('disconnecting', () => {
+        const rooms = [...socket.rooms];
+
+        rooms.forEach((roomId) => {
+            socket.in(roomId).emit(ACTIONS.DISCONNECTED, {
+                socketId: socket.id,
+                username: userSocketMap[socket.id],
+            });
+
+            // ✅ Remove socket from activeRooms
+            if (activeRooms[roomId]) {
+                activeRooms[roomId].delete(socket.id);
+                if (activeRooms[roomId].size === 0) {
+                    delete activeRooms[roomId];
+                    console.log(`Cleaned up empty room: ${roomId}`);
+                }
+            }
+        });
+
+        delete userSocketMap[socket.id];
+        socket.leave();
+    });
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`Server is listening on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Listening on port ${PORT}`));
