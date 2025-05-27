@@ -14,14 +14,15 @@ app.use((req, res, next) => {
 });
 
 const userSocketMap = {};
-const activeRooms = {}; // ✅ Track rooms and their socket IDs
-
 function getAllConnectedClients(roomId) {
+    // Map
     return Array.from(io.sockets.adapter.rooms.get(roomId) || []).map(
-        (socketId) => ({
-            socketId,
-            username: userSocketMap[socketId],
-        })
+        (socketId) => {
+            return {
+                socketId,
+                username: userSocketMap[socketId],
+            };
+        }
     );
 }
 
@@ -31,11 +32,6 @@ io.on('connection', (socket) => {
     socket.on(ACTIONS.JOIN, ({ roomId, username }) => {
         userSocketMap[socket.id] = username;
         socket.join(roomId);
-
-        // ✅ Track active rooms
-        if (!activeRooms[roomId]) activeRooms[roomId] = new Set();
-        activeRooms[roomId].add(socket.id);
-
         const clients = getAllConnectedClients(roomId);
         clients.forEach(({ socketId }) => {
             io.to(socketId).emit(ACTIONS.JOINED, {
@@ -56,27 +52,16 @@ io.on('connection', (socket) => {
 
     socket.on('disconnecting', () => {
         const rooms = [...socket.rooms];
-
         rooms.forEach((roomId) => {
             socket.in(roomId).emit(ACTIONS.DISCONNECTED, {
                 socketId: socket.id,
                 username: userSocketMap[socket.id],
             });
-
-            // ✅ Remove socket from activeRooms
-            if (activeRooms[roomId]) {
-                activeRooms[roomId].delete(socket.id);
-                if (activeRooms[roomId].size === 0) {
-                    delete activeRooms[roomId];
-                    console.log(`Cleaned up empty room: ${roomId}`);
-                }
-            }
         });
-
         delete userSocketMap[socket.id];
         socket.leave();
     });
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`Listening on port ${PORT}`));
+server.listen(PORT, () => console.log(Listening on port ${PORT}));
